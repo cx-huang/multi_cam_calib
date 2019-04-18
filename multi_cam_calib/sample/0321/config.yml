@@ -1,0 +1,61 @@
+%YAML:1.0
+filepath: "data/sample0321/"
+code: "0101111100110100100001"
+auto: 1
+imagelist:
+   - "imagelist-1"
+imagelist-1:
+   - "ref_0.jpg"
+   - "ref_1.jpg"
+   - "ref_2.jpg"
+   - "ref_3.jpg"
+   - "ref_4.jpg"
+   - "ref_5.jpg"
+   - "ref_6.jpg"
+   - "ref_7.jpg"
+   - "ref_8.jpg"
+   - "ref_9.jpg"
+backgroundlist:
+   - "back_0.jpg"
+   - "back_1.jpg"
+   - "back_2.jpg"
+   - "back_3.jpg"
+   - "back_4.jpg"
+   - "back_5.jpg"
+   - "back_6.jpg"
+   - "back_7.jpg"
+   - "back_8.jpg"
+   - "back_9.jpg"
+kinect_sn:
+   - "0_color.jpg"
+   - "1_color.jpg"
+kinect_info: “kinect_info.yml"
+kinect_calib_name: "kinect_calib.yml"
+camera_calib_name: "cam_calib.yml"
+isrotated: "0000000000"
+camPair:
+   - 0
+   - 1
+   - 2
+   - 3
+   - 4
+   - 5
+   - 6
+   - 7
+   - 8
+   - 9
+radii:125
+DF: 16
+init_cx: 1953
+init_cy: 2968
+initfc:
+   - 4833
+   - 4833
+   - 4833
+   - 4833
+   - 4833
+   - 4833
+   - 4833
+   - 4833
+   - 4833
+   - 4833

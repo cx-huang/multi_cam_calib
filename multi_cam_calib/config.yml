@@ -1,0 +1,75 @@
+%YAML:1.0
+cam_num: 10
+cam_list:
+   - 0
+   - 1
+   - 2
+   - 3
+   - 4
+   - 5
+   - 6
+   - 7
+   - 8
+   - 9
+sample_filepath: "sample/0321/"
+imagelist_vector: 
+   - "imagelist_1"
+imagelist_1:
+   - "ref_0.jpg"
+   - "ref_1.jpg"
+   - "ref_2.jpg"
+   - "ref_3.jpg"
+   - "ref_4.jpg"
+   - "ref_5.jpg"
+   - "ref_6.jpg"
+   - "ref_7.jpg"
+   - "ref_8.jpg"
+   - "ref_9.jpg"
+backgroundlist_vector:
+   - "backgroundlist_1"
+backgroundlist_1:
+   - "back_0.jpg"
+   - "back_1.jpg"
+   - "back_2.jpg"
+   - "back_3.jpg"
+   - "back_4.jpg"
+   - "back_5.jpg"
+   - "back_6.jpg"
+   - "back_7.jpg"
+   - "back_8.jpg"
+   - "back_9.jpg"
+ball_radii: 125
+tag_pnt_dist: 16
+principal_pnt_x:
+   - 2000
+   - 2000
+   - 2000
+   - 2000
+   - 2000
+   - 2000
+   - 2000
+   - 2000
+   - 2000
+   - 2000
+principal_pnt_y:
+   - 3000
+   - 3000
+   - 3000
+   - 3000
+   - 3000
+   - 3000
+   - 3000
+   - 3000
+   - 3000
+   - 3000
+focal_len:
+   - 4829
+   - 4829
+   - 4829
+   - 4829
+   - 4829
+   - 4829
+   - 4829
+   - 4829
+   - 4829
+   - 4829
