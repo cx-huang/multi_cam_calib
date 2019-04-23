@@ -248,7 +248,7 @@ void CalibBall::FindPoints(
 	TwoPass(binary_image, label_image);	//1min or so
 
 	vector<vector<int>> tag;//tag[i][j] = k: the ith tag's jth point is tag_pnt[k]
-	map<int, int> region;	//regin[i] = j: the ith region is the jth tag
+	map<int, int> region;	//region[i] = j: the ith region is the jth tag
 	int tag_idx = 0;
 	for (int i = 0; i < tag_pnts.size(); i++)
 	{
