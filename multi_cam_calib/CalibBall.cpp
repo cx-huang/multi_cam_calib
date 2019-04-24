@@ -2,7 +2,7 @@
 #include "opencv2/cvsba.h"
 
 #define IS_DEBUG_FINDPOINTS
-#define IS_DEBUG_CALR
+//#define IS_DEBUG_CALR
 //#define IS_OUTPUT_CIRCLE
 //#define IS_DRAW_POINTS
 #define IS_PROJ
@@ -94,9 +94,50 @@ void CalibBall::Run(
 		vector<vector<Point2d>> cur_pntsI(_cam_num);
 		vector<vector<int>> cur_visibility(_cam_num);
 		RunOnce(cur_imagelist, cur_backgroundlist, cur_pntsW, cur_pntsI, cur_visibility, R, T);
-	
-	}
+#if 1
+		for (int i = 0; i < _cam_num; i++)
+		{
+			int cur_npnt = cur_pntsI[i].size();
+			for (int j = 0; j < cur_npnt; j++)
+			{
+				pntsI[i].push_back(cur_pntsI[i][j]);
+				visibility[i].push_back(cur_visibility[i][j]);
+			}
+		}
 
+		Mat T_base, T_new;
+		Point3d T_temp;
+		if (i == 0)
+		{
+			T_base = T[0];
+			T_temp.x = 0;
+			T_temp.y = 0;
+			T_temp.z = 0;
+		}
+		else
+		{
+			T_new = T_base - T[0];
+			T_temp.x = T_new.at<double>(0, 0);
+			T_temp.y = T_new.at<double>(1, 0);
+			T_temp.z = T_new.at<double>(2, 0);
+		}
+		for (int i = 0; i < cur_pntsW.size(); i++)
+			pntsW.push_back(cur_pntsW[i] + T_temp);
+#endif
+	}
+#if 1
+	cvsba::Sba sba;
+	cvsba::Sba::Params params;
+	params.type = cvsba::Sba::MOTIONSTRUCTURE;
+	params.iterations = 1000;
+	params.minError = 1e-1;
+	params.fixedIntrinsics = 1;
+	params.fixedDistortion = 5;
+	params.verbose = 0;
+	sba.setParams(params);
+	sba.run(pntsW, pntsI, visibility, cam_matrices, R, T, dis_coeffs);
+	std::cout << "** SBA Optimization **" << endl << "Initial error = " << sba.getInitialReprjError() << endl << "Final error = " << sba.getFinalReprjError() << endl;
+#endif
 	clock_t end = clock();
 	std::cout << "** Duration **" << endl << (end - start) / CLOCKS_PER_SEC << " s (about " << (end - start) / CLOCKS_PER_SEC / 60 << " min)" << endl;
 }
