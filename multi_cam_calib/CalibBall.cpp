@@ -2,7 +2,7 @@
 #include "opencv2/cvsba.h"
 
 #define IS_DEBUG_FINDPOINTS
-//#define IS_DEBUG_CALR
+#define IS_DEBUG_CALR
 //#define IS_OUTPUT_CIRCLE
 //#define IS_DRAW_POINTS
 #define IS_PROJ
@@ -697,7 +697,7 @@ void CalibBall::ProcessForSBA(
 		pntsI[i] = p;
 	}
 	int count = 0;
-	double threshold = 0.15;
+	double threshold = SHARED_PNT_THRES;
 	cout << "visibility: ";
 	int vis_size = int(visibility.size());
 	vector<Mat> points_normed(pntsW.size());
