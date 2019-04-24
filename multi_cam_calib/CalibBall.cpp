@@ -1,7 +1,8 @@
 #include "CalibBall.h"
 #include "opencv2/cvsba.h"
 
-#define IS_DEBUG
+#define IS_DEBUG_FINDPOINTS
+//#define IS_DEBUG_CALR
 //#define IS_OUTPUT_CIRCLE
 //#define IS_DRAW_POINTS
 #define IS_PROJ
@@ -93,7 +94,7 @@ void CalibBall::Run(
 		vector<vector<Point2d>> cur_pntsI(_cam_num);
 		vector<vector<int>> cur_visibility(_cam_num);
 		RunOnce(cur_imagelist, cur_backgroundlist, cur_pntsW, cur_pntsI, cur_visibility, R, T);
-
+	
 	}
 
 	clock_t end = clock();
@@ -113,7 +114,7 @@ void CalibBall::RunOnce(
 	vector<vector<vector<Point3d>>> pntpairsW(_cam_num);
 	vector<vector<vector<Point2f>>> pntpairsI(_cam_num);
 	vector<Vec3d> circles(_cam_num);
-#ifndef IS_DEBUG
+#ifndef IS_DEBUG_FINDPOINTS
 	//step1: find points on the ball and calculate T
 #pragma omp parallel for
 	for (int i = 0; i < _cam_num; i++)
@@ -130,49 +131,49 @@ void CalibBall::RunOnce(
 		PointI2W(pntpairsI[i], pntpairsW[i], circles[i], T[i], i);
 	}
 
-	FileStorage fw("debug1.yml", FileStorage::WRITE);
-	fw << "circles" << circles;
+	FileStorage fw1("debug1.yml", FileStorage::WRITE);
+	fw1 << "circles" << circles;
 	int pntpairsW_size = pntpairsW.size();
-	fw << "pntpairsW_size" << pntpairsW_size;
+	fw1 << "pntpairsW_size" << pntpairsW_size;
 	for (int i = 0; i < pntpairsW_size; i++)
 	{
 		stringstream ss;
 		ss << "pntpairsW_" << i;
-		fw << ss.str() << pntpairsW[i];
+		fw1 << ss.str() << pntpairsW[i];
 	}
 	int pntpairsI_size = pntpairsI.size();
-	fw << "pntpairsI_size" << pntpairsI_size;
+	fw1 << "pntpairsI_size" << pntpairsI_size;
 	for (int i = 0; i < pntpairsI_size; i++)
 	{
 		stringstream ss;
 		ss << "pntpairsI_" << i;
-		fw << ss.str() << pntpairsI[i];
+		fw1 << ss.str() << pntpairsI[i];
 	}
-	fw << "T" << T;
-	fw.release();
+	fw1 << "T" << T;
+	fw1.release();
 	std::cout << ">> successfully write debug1.yml!" << endl;
 #else
-	FileStorage fr("debug1.yml", FileStorage::READ);
+	FileStorage fr1("debug1.yml", FileStorage::READ);
 	int pntpairsW_size_;
-	fr["pntpairsW_size"] >> pntpairsW_size_;
+	fr1["pntpairsW_size"] >> pntpairsW_size_;
 	pntpairsW.resize(pntpairsW_size_);
 	for (int i = 0; i < pntpairsW_size_; i++)
 	{
 		stringstream ss;
 		ss << "pntpairsW_" << i;
-		fr[ss.str()] >> pntpairsW[i];
+		fr1[ss.str()] >> pntpairsW[i];
 	}
 	int pntpairsI_size_;
-	fr["pntpairsI_size"] >> pntpairsI_size_;
+	fr1["pntpairsI_size"] >> pntpairsI_size_;
 	pntpairsI.resize(pntpairsI_size_);
 	for (int i = 0; i < pntpairsI_size_; i++)
 	{
 		stringstream ss;
 		ss << "pntpairsI_" << i;
-		fr[ss.str()] >> pntpairsI[i];
+		fr1[ss.str()] >> pntpairsI[i];
 	}
-	fr["T"] >> T;
-	fr.release();
+	fr1["T"] >> T;
+	fr1.release();
 	std::cout << ">> successfully read debug1.yml!" << endl;
 #endif
 	//step2: calculate R
@@ -181,13 +182,12 @@ void CalibBall::RunOnce(
 	{
 		NormalizePoints(pntpairsW[i], pntpairsW_normed[i]);
 	}
-
 	cur_visibility[0].resize(pntpairsW_normed[0].size());
 	for (int i = 0; i < cur_visibility[0].size(); i++)
 	{
 		cur_visibility[0][i] = -1;
 	}
-
+#ifndef IS_DEBUG_CALR
 	cout << ">> calculating R ..." << endl;
 	R[0] = Mat::eye(3, 3, CV_64FC1);
 	for (int i = 1; i < _cam_num; i++)
@@ -195,6 +195,24 @@ void CalibBall::RunOnce(
 		CalR(pntpairsW_normed[i - 1], pntpairsW_normed[i], cur_visibility[i - 1], cur_visibility[i], cur_pntsW, R[i]);
 	}
 
+	FileStorage fw2("debug2.yml", FileStorage::WRITE);
+	fw2 << "pntpairsW_normed" << pntpairsW_normed;
+	fw2 << "cur_visibility" << cur_visibility;
+	fw2 << "cur_pntsW" << cur_pntsW;
+	fw2 << "R" << R;
+	fw2.release();
+	std::cout << ">> successfully write debug2.yml!" << endl;
+#else
+	FileStorage fr2("debug2.yml", FileStorage::WRITE);
+	fr2["pntpairsW_normed"] >> pntpairsW_normed;
+	fr2["cur_visibility"] >> cur_visibility;
+	fr2["cur_pntsW"] >> cur_pntsW;
+	fr2["R"] >> R;
+	fr2.release();
+	std::cout << ">> successfully read debug2.yml!" << endl;
+#endif
+	for (int i = 0; i < _cam_num; ++i)
+		ProcessForSBA(pntpairsI[i], pntpairsW_normed[i], cur_pntsI[i], cur_pntsW, cur_visibility[i]);
 }
 
 void CalibBall::CalR(
@@ -659,4 +677,71 @@ void CalibBall::NormalizePoints(
 		pntpairW_normed[i] = Mat::zeros(3, 3, CV_64FC1);
 		temp.copyTo(pntpairW_normed[i]);
 	}
+}
+
+void CalibBall::ProcessForSBA(
+	vector<vector<Point2f>> pntpairsI,
+	vector<Mat> pntpairsW_normed,
+	vector<Point2d> &pntsI,
+	vector<Point3d> pntsW,
+	vector<int> &visibility
+)
+{
+	size_t nPoints = pntsW.size();	//{W}球上角点的个数
+	pntsI.resize(nPoints);
+	vector<int> visibility_new(nPoints);
+	Point2d p(0, 0);
+	for (int i = 0; i < nPoints; i++)
+	{
+		visibility_new[i] = 0;
+		pntsI[i] = p;
+	}
+	int count = 0;
+	double threshold = 0.15;
+	cout << "visibility: ";
+	int vis_size = int(visibility.size());
+	vector<Mat> points_normed(pntsW.size());
+	for (int i = 0; i < pntsW.size(); i++)
+	{
+		points_normed[i] = Mat(pntsW[i] * (1 / _ball_radii));
+	}
+	for (int i = 0; i < vis_size; i++)
+	{
+		if (visibility[i] != -1)
+		{
+			int idx = visibility[i] << 1;
+			pntsI[idx] = pntpairsI[i][0];
+			pntsI[idx + 1] = pntpairsI[i][1];
+			visibility_new[idx] = 1;
+			visibility_new[idx + 1] = 1;
+			count++;
+		}
+		else
+		{
+			double min_error = 1e6;
+			int idx = 0;
+			for (int j = 0; j < nPoints; j += 2)
+			{
+				if (visibility_new[j] == 0)
+				{
+					double error = MAX(norm(pntpairsW_normed[i].col(0) - points_normed[j]), norm(pntpairsW_normed[i].col(1) - points_normed[j + 1]));
+					if (min_error > error)
+					{
+						min_error = error;
+						idx = j;
+					}
+				}
+			}
+			if (min_error < threshold)
+			{
+				pntsI[idx] = pntpairsI[i][0];
+				pntsI[idx + 1] = pntpairsI[i][1];
+				visibility_new[idx] = 1;
+				visibility_new[idx + 1] = 1;
+				count++;
+			}
+		}
+	}
+	cout << count << "/" << visibility.size() << endl;
+	visibility = visibility_new;
 }
