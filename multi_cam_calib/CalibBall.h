@@ -7,7 +7,6 @@
 #include <vector>
 #include <map>
 #include <time.h>
-#include <typeinfo.h>
 
 using namespace std;
 using namespace cv;
