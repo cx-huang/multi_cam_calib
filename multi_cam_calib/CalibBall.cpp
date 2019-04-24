@@ -2,14 +2,18 @@
 #include "opencv2/cvsba.h"
 
 #define IS_DEBUG_FINDPOINTS
-//#define IS_DEBUG_CALR
+#define IS_DEBUG_CALR
 //#define IS_OUTPUT_CIRCLE
 //#define IS_DRAW_POINTS
 #define IS_PROJ
 #define MINR 1000	//in FindCircle(): the minimum radius of the circle in the image
 #define MAXR 2000	//in FindCircle(): the maximum raidus of the circle in the image
-#define TAG_THRES 50//in FindPoints(): for binarization of tag mask
-#define SHARED_PNT_THRES 0.1	//in CalR(): for selection of shared points
+#define CIRCLE_CUT 120	
+#define TAG_THRES 50	//in FindPoints(): for binarization of tag mask
+#define SHARED_PNT_THRES 0.1//in CalR(): for selection of shared points
+#define SBA_ITERATION 1000
+#define SBA_MINERROR 1e-1
+#define SBA_FIXED_INTRINSIC 1
 #define SQUARE(x) ((x) * (x))
 #define MAX(a, b) ((a>b)?(a):(b))
 #define ASSERT(expression)	if(expression)\
@@ -94,10 +98,11 @@ void CalibBall::Run(
 		vector<vector<Point2d>> cur_pntsI(_cam_num);
 		vector<vector<int>> cur_visibility(_cam_num);
 		RunOnce(cur_imagelist, cur_backgroundlist, cur_pntsW, cur_pntsI, cur_visibility, R, T);
+
 #if 1
 		for (int i = 0; i < _cam_num; i++)
 		{
-			int cur_npnt = cur_pntsI[i].size();
+			int cur_npnt = cur_pntsW.size();
 			for (int j = 0; j < cur_npnt; j++)
 			{
 				pntsI[i].push_back(cur_pntsI[i][j]);
@@ -126,20 +131,24 @@ void CalibBall::Run(
 #endif
 	}
 #if 1
+	cout << ">> projection before SBA:" << endl;
+	ProjectToImg(cur_imagelist, cam_matrices, R, T, pntsW, pntsI, visibility);
 	cvsba::Sba sba;
 	cvsba::Sba::Params params;
 	params.type = cvsba::Sba::MOTIONSTRUCTURE;
-	params.iterations = 1000;
-	params.minError = 1e-1;
-	params.fixedIntrinsics = 1;
+	params.iterations = SBA_ITERATION;
+	params.minError = SBA_MINERROR;
+	params.fixedIntrinsics = SBA_FIXED_INTRINSIC;
 	params.fixedDistortion = 5;
 	params.verbose = 0;
 	sba.setParams(params);
 	sba.run(pntsW, pntsI, visibility, cam_matrices, R, T, dis_coeffs);
-	std::cout << "** SBA Optimization **" << endl << "Initial error = " << sba.getInitialReprjError() << endl << "Final error = " << sba.getFinalReprjError() << endl;
+	std::cout << ">> SBA optimization:" << endl << "initial error: " << sba.getInitialReprjError() << endl << "final error: " << sba.getFinalReprjError() << endl;
 #endif
+	cout << ">> projection after SBA:" << endl;
+	ProjectToImg(cur_imagelist, cam_matrices, R, T, pntsW, pntsI, visibility);
 	clock_t end = clock();
-	std::cout << "** Duration **" << endl << (end - start) / CLOCKS_PER_SEC << " s (about " << (end - start) / CLOCKS_PER_SEC / 60 << " min)" << endl;
+	std::cout << ">> duration: " << (end - start) / CLOCKS_PER_SEC << "s / " << (end - start) / CLOCKS_PER_SEC / 60 << "min" << endl;
 }
 
 void CalibBall::RunOnce(
@@ -193,7 +202,7 @@ void CalibBall::RunOnce(
 	fw1 << "T" << T;
 	fw1.release();
 	std::cout << ">> successfully write debug1.yml!" << endl;
-#else
+#else	//read data from file
 	FileStorage fr1("debug1.yml", FileStorage::READ);
 	int pntpairsW_size_;
 	fr1["pntpairsW_size"] >> pntpairsW_size_;
@@ -218,11 +227,8 @@ void CalibBall::RunOnce(
 	std::cout << ">> successfully read debug1.yml!" << endl;
 #endif
 	//step2: calculate R
-	vector<vector<Mat>> pntpairsW_normed(_cam_num);
-	for (int i = 0; i < _cam_num; i++)
-	{
-		NormalizePoints(pntpairsW[i], pntpairsW_normed[i]);
-	}
+	vector<vector<Matx33d>> pntpairsW_normed(_cam_num);
+	NormalizePoints(pntpairsW[0], pntpairsW_normed[0]);
 	cur_visibility[0].resize(pntpairsW_normed[0].size());
 	for (int i = 0; i < cur_visibility[0].size(); i++)
 	{
@@ -233,6 +239,7 @@ void CalibBall::RunOnce(
 	R[0] = Mat::eye(3, 3, CV_64FC1);
 	for (int i = 1; i < _cam_num; i++)
 	{
+		NormalizePoints(pntpairsW[i], pntpairsW_normed[i]);
 		CalR(pntpairsW_normed[i - 1], pntpairsW_normed[i], cur_visibility[i - 1], cur_visibility[i], cur_pntsW, R[i]);
 	}
 
@@ -244,7 +251,7 @@ void CalibBall::RunOnce(
 	fw2.release();
 	std::cout << ">> successfully write debug2.yml!" << endl;
 #else
-	FileStorage fr2("debug2.yml", FileStorage::WRITE);
+	FileStorage fr2("debug2.yml", FileStorage::READ);
 	fr2["pntpairsW_normed"] >> pntpairsW_normed;
 	fr2["cur_visibility"] >> cur_visibility;
 	fr2["cur_pntsW"] >> cur_pntsW;
@@ -252,13 +259,20 @@ void CalibBall::RunOnce(
 	fr2.release();
 	std::cout << ">> successfully read debug2.yml!" << endl;
 #endif
+	std::cout << ">> " << endl;
 	for (int i = 0; i < _cam_num; ++i)
 		ProcessForSBA(pntpairsI[i], pntpairsW_normed[i], cur_pntsI[i], cur_pntsW, cur_visibility[i]);
+
+	FileStorage fw3("debug3.yml", FileStorage::WRITE);
+	fw3 << "cur_pntsI" << cur_pntsI;
+	fw3 << "cur_visibility" << cur_visibility;
+	fw3.release();
+	std::cout << ">> successfully write debug3.yml!" << endl;
 }
 
 void CalibBall::CalR(
-	vector<Mat> pntpairs_src,
-	vector<Mat> &pntpairs_dst,
+	vector<Matx33d> pntpairs_src,
+	vector<Matx33d> &pntpairs_dst,
 	vector<int> &visibility_src,
 	vector<int> &visibility_dst,
 	vector<Point3d> &pntsW,
@@ -277,7 +291,7 @@ void CalibBall::CalR(
 	{
 		for (int j = 0; j < dst_size; j++)
 		{
-			Mat temp = pntpairs_dst[j] * pntpairs_src[i].t();
+			Mat temp = Mat(pntpairs_dst[j]) * Mat(pntpairs_src[i].t());
 			Mat w, u, vt;
 			SVD::compute(temp, w, u, vt, SVD::FULL_UV);
 			Mat R_candidate = u * vt;
@@ -291,7 +305,7 @@ void CalibBall::CalR(
 					continue;
 				}
 
-				Mat pntpair_new = R_candidate * pntpairs_src[k];
+				Mat pntpair_new = R_candidate * Mat(pntpairs_src[k]);
 				double min_error = 1e6;
 				for (int l = 0; l < dst_size; l++)
 				{
@@ -300,7 +314,7 @@ void CalibBall::CalR(
 						continue;
 					}
 
-					double error = MAX(norm(pntpair_new.col(0) - pntpairs_dst[l].col(0)), norm(pntpair_new.col(1) - pntpairs_dst[l].col(1)));
+					double error = MAX(norm(pntpair_new.col(0) - Mat(pntpairs_dst[l].col(0))), norm(pntpair_new.col(1) - Mat(pntpairs_dst[l].col(1))));
 					if (error < min_error)
 					{
 						min_error = error;
@@ -330,7 +344,7 @@ void CalibBall::CalR(
 
 	//step2: determine visible points between each two cameras
 	visibility_dst.resize(dst_size);
-	int the_xth_visible_pntpair = 0;
+	int the_xth_visible_pntpair = pntsW.size() / 2;	//where there is more than one imagelist, this variable's value is not 0 in the beginning
 	for (int j = 0; j < dst_size; j++)
 	{
 		if (j == best_j)
@@ -339,7 +353,7 @@ void CalibBall::CalR(
 			{
 				for (int k = 0; k < 2; k++)
 				{
-					Mat pnt = _ball_radii * pntpairs_src[best_i].col(k);
+					Mat pnt = _ball_radii * Mat(pntpairs_src[best_i].col(k));
 					pntsW.push_back(Point3d(pnt.at<double>(0, 0), pnt.at<double>(1, 0), pnt.at<double>(2, 0)));
 				}
 				visibility_src[best_i] = the_xth_visible_pntpair;
@@ -349,12 +363,12 @@ void CalibBall::CalR(
 			continue;
 		}
 
-		Mat pntpair_new = R.t() * pntpairs_dst[j];
+		Mat pntpair_new = R.t() * Mat(pntpairs_dst[j]);
 		double min_error = 1e6;
 		int fit_pntpair = 0;
 		for (int i = 0; i < src_size; i++)
 		{
-			double error = norm(pntpair_new.col(0) - pntpairs_src[i].col(0)) + norm(pntpair_new.col(1) - pntpairs_src[i].col(1));
+			double error = norm(pntpair_new.col(0) - Mat(pntpairs_src[i].col(0))) + norm(pntpair_new.col(1) - Mat(pntpairs_src[i].col(1)));
 			if (error < min_error)
 			{
 				min_error = error;
@@ -367,7 +381,7 @@ void CalibBall::CalR(
 			{
 				for (int k = 0; k < 2; k++)
 				{
-					Mat pnt = _ball_radii * pntpairs_src[fit_pntpair].col(k);
+					Mat pnt = _ball_radii * Mat(pntpairs_src[fit_pntpair].col(k));
 					pntsW.push_back(Point3d(pnt.at<double>(0, 0), pnt.at<double>(1, 0), pnt.at<double>(2, 0)));
 				}
 				visibility_src[fit_pntpair] = the_xth_visible_pntpair;
@@ -381,9 +395,11 @@ void CalibBall::CalR(
 		}
 	}
 
+	
 	for (int i = 0; i < dst_size; i++)
 	{
-		pntpairs_dst[i] = R.t() * pntpairs_dst[i];
+		Mat temp = R.t() * Mat(pntpairs_dst[i]);
+		pntpairs_dst[i] = temp;
 	}
 }
 
@@ -423,7 +439,7 @@ void CalibBall::FindCircle(
 	}
 	Point2i bestCircleCenter(cvRound(circle_[0]), cvRound(circle_[1]));
 	Mat mask(image.size(), CV_8UC1, Scalar(0));
-	circle(mask, bestCircleCenter, cvRound(circle_[2]) - 120, Scalar(255), CV_FILLED);
+	circle(mask, bestCircleCenter, cvRound(circle_[2]) - CIRCLE_CUT, Scalar(255), CV_FILLED);
 	Mat dst;
 	image.copyTo(dst, mask);
 	mask.setTo(0);
@@ -704,7 +720,7 @@ void TwoPass(
 
 void CalibBall::NormalizePoints(
 	vector<vector<Point3d>> pntpairW,
-	vector<Mat> &pntpairW_normed
+	vector<Matx33d> &pntpairW_normed
 )
 {
 	int src_size = pntpairW.size();
@@ -715,14 +731,14 @@ void CalibBall::NormalizePoints(
 		Mat(pntpairW[i][0] * (1 / norm(pntpairW[i][0]))).copyTo(temp.col(0));
 		Mat(pntpairW[i][1] * (1 / norm(pntpairW[i][1]))).copyTo(temp.col(1));
 		Mat(temp.col(1).cross(temp.col(0)) * (1 / norm(temp.col(1).cross(temp.col(0))))).copyTo(temp.col(2));
-		pntpairW_normed[i] = Mat::zeros(3, 3, CV_64FC1);
+		//pntpairW_normed[i] = Mat::zeros(3, 3, CV_64FC1);
 		temp.copyTo(pntpairW_normed[i]);
 	}
 }
 
 void CalibBall::ProcessForSBA(
 	vector<vector<Point2f>> pntpairsI,
-	vector<Mat> pntpairsW_normed,
+	vector<Matx33d> pntpairsW_normed,
 	vector<Point2d> &pntsI,
 	vector<Point3d> pntsW,
 	vector<int> &visibility
@@ -765,7 +781,7 @@ void CalibBall::ProcessForSBA(
 			{
 				if (visibility_new[j] == 0)
 				{
-					double error = MAX(norm(pntpairsW_normed[i].col(0) - points_normed[j]), norm(pntpairsW_normed[i].col(1) - points_normed[j + 1]));
+					double error = MAX(norm(Mat(pntpairsW_normed[i].col(0)) - points_normed[j]), norm(Mat(pntpairsW_normed[i].col(1)) - points_normed[j + 1]));
 					if (min_error > error)
 					{
 						min_error = error;
@@ -785,4 +801,57 @@ void CalibBall::ProcessForSBA(
 	}
 	cout << count << "/" << visibility.size() << endl;
 	visibility = visibility_new;
+}
+
+void CalibBall::ProjectToImg(
+	vector<string> &imagelist,
+	vector<Mat> cam_matrices,
+	vector<Mat> R,
+	vector<Mat> T,
+	vector<Point3d> pntsW,
+	vector<vector<Point2d>> pntsI,
+	vector<vector<int>> visibility
+)
+{
+	int proj_npnts = 0;
+	double total_proj_error = 0;
+	double total_radius_error = 0;
+	for (int i = 0; i < _cam_num; i++)
+	{
+#ifdef IS_PROJ
+		Mat image = imread(_sample_filepath + imagelist[i]);
+#endif
+		Mat P1 = cam_matrices[i] * R[i];
+		Mat P2 = cam_matrices[i] * T[i];
+		for (int j = 0; j < pntsW.size(); j++)
+		{
+			if (visibility[i][j] == 1)
+			{
+				Mat pnt = P1 * Mat(pntsW[j]) + P2;
+				Point2d center(pnt.at<double>(0, 0) / pnt.at<double>(2, 0), pnt.at<double>(1, 0) / pnt.at<double>(2, 0));
+#ifdef IS_PROJ
+				circle(image, Point(center), 5, Scalar(0, 255, 0), CV_FILLED);
+				circle(image, Point(pntsI[i][j]), 3, Scalar(255, 0, 0), CV_FILLED);
+#endif
+				total_proj_error += norm(center - pntsI[i][j]);
+				proj_npnts++;
+			}
+		}
+#ifdef IS_PROJ
+		imwrite("output//projection//" + imagelist[i], image);
+#endif
+	}
+	std::cout << ">>" << "mean projection error: " << total_proj_error / proj_npnts << " pixels of " << proj_npnts << " projections" <<  endl;
+	for (int i = 0; i < pntsW.size(); i++)
+	{
+		total_radius_error += norm(pntsW[i]);
+	}
+	std::cout << "mean radius error: " << total_radius_error / pntsW.size() << " mm of " << pntsW.size() << " points" <<  endl;
+}
+
+void CalibBall::ScaleToWorld(
+	vector<Point3d> &pntsW,
+	vector<Mat> &T
+)
+{
 }
