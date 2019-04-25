@@ -1,5 +1,6 @@
 #include "CalibBall.h"
 #include "opencv2/cvsba.h"
+#include "fstream"
 
 #define IS_DEBUG_FINDPOINTS
 #define IS_DEBUG_CALR
@@ -22,7 +23,7 @@
 							}\
 							else\
 							{\
-								cout << "[Assertion failed!] file # " << __FILE__ << " #, line # " << __LINE__ << " #" << endl; \
+								std::cout << "[Assertion failed!] file # " << __FILE__ << " #, line # " << __LINE__ << " #" << endl; \
 								abort();\
 							}
 
@@ -99,7 +100,6 @@ void CalibBall::Run(
 		vector<vector<int>> cur_visibility(_cam_num);
 		RunOnce(cur_imagelist, cur_backgroundlist, cur_pntsW, cur_pntsI, cur_visibility, R, T);
 
-#if 1
 		for (int i = 0; i < _cam_num; i++)
 		{
 			int cur_npnt = cur_pntsW.size();
@@ -128,11 +128,10 @@ void CalibBall::Run(
 		}
 		for (int i = 0; i < cur_pntsW.size(); i++)
 			pntsW.push_back(cur_pntsW[i] + T_temp);
-#endif
 	}
-#if 1
-	cout << ">> projection before SBA:" << endl;
-	ProjectToImg(cur_imagelist, cam_matrices, R, T, pntsW, pntsI, visibility);
+
+	//std::cout << ">> projection before SBA:" << endl;
+	//ProjectToImg(cur_imagelist, cam_matrices, R, T, pntsW, pntsI, visibility);
 	cvsba::Sba sba;
 	cvsba::Sba::Params params;
 	params.type = cvsba::Sba::MOTIONSTRUCTURE;
@@ -144,9 +143,9 @@ void CalibBall::Run(
 	sba.setParams(params);
 	sba.run(pntsW, pntsI, visibility, cam_matrices, R, T, dis_coeffs);
 	std::cout << ">> SBA optimization:" << endl << "initial error: " << sba.getInitialReprjError() << endl << "final error: " << sba.getFinalReprjError() << endl;
-#endif
-	cout << ">> projection after SBA:" << endl;
-	ProjectToImg(cur_imagelist, cam_matrices, R, T, pntsW, pntsI, visibility);
+	//std::cout << ">> projection after SBA:" << endl;
+	//ProjectToImg(cur_imagelist, cam_matrices, R, T, pntsW, pntsI, visibility);
+	OutputForViewer(pntsW, R, T);
 	clock_t end = clock();
 	std::cout << ">> duration: " << (end - start) / CLOCKS_PER_SEC << "s / " << (end - start) / CLOCKS_PER_SEC / 60 << "min" << endl;
 }
@@ -182,6 +181,11 @@ void CalibBall::RunOnce(
 	}
 
 	FileStorage fw1("debug1.yml", FileStorage::WRITE);
+	if (!fw1.isOpened())
+	{
+		std::cout << ">> cannot open debug1.yml!" << endl;
+		exit(-1);
+	}
 	fw1 << "circles" << circles;
 	int pntpairsW_size = pntpairsW.size();
 	fw1 << "pntpairsW_size" << pntpairsW_size;
@@ -204,6 +208,11 @@ void CalibBall::RunOnce(
 	std::cout << ">> successfully write debug1.yml!" << endl;
 #else	//read data from file
 	FileStorage fr1("debug1.yml", FileStorage::READ);
+	if (!fr1.isOpened())
+	{
+		std::cout << ">> cannot open debug1.yml!" << endl;
+		exit(-1);
+	}
 	int pntpairsW_size_;
 	fr1["pntpairsW_size"] >> pntpairsW_size_;
 	pntpairsW.resize(pntpairsW_size_);
@@ -235,7 +244,7 @@ void CalibBall::RunOnce(
 		cur_visibility[0][i] = -1;
 	}
 #ifndef IS_DEBUG_CALR
-	cout << ">> calculating R ..." << endl;
+	std::cout << ">> calculating R ..." << endl;
 	R[0] = Mat::eye(3, 3, CV_64FC1);
 	for (int i = 1; i < _cam_num; i++)
 	{
@@ -244,6 +253,11 @@ void CalibBall::RunOnce(
 	}
 
 	FileStorage fw2("debug2.yml", FileStorage::WRITE);
+	if (!fw2.isOpened())
+	{
+		std::cout << ">> cannot open debug2.yml!" << endl;
+		exit(-1);
+	}
 	fw2 << "pntpairsW_normed" << pntpairsW_normed;
 	fw2 << "cur_visibility" << cur_visibility;
 	fw2 << "cur_pntsW" << cur_pntsW;
@@ -252,6 +266,11 @@ void CalibBall::RunOnce(
 	std::cout << ">> successfully write debug2.yml!" << endl;
 #else
 	FileStorage fr2("debug2.yml", FileStorage::READ);
+	if (!fr2.isOpened())
+	{
+		std::cout << ">> cannot open debug2.yml!" << endl;
+		exit(-1);
+	}
 	fr2["pntpairsW_normed"] >> pntpairsW_normed;
 	fr2["cur_visibility"] >> cur_visibility;
 	fr2["cur_pntsW"] >> cur_pntsW;
@@ -264,6 +283,11 @@ void CalibBall::RunOnce(
 		ProcessForSBA(pntpairsI[i], pntpairsW_normed[i], cur_pntsI[i], cur_pntsW, cur_visibility[i]);
 
 	FileStorage fw3("debug3.yml", FileStorage::WRITE);
+	if (!fw3.isOpened())
+	{
+		std::cout << ">> cannot open debug3.yml!" << endl;
+		exit(-1);
+	}
 	fw3 << "cur_pntsI" << cur_pntsI;
 	fw3 << "cur_visibility" << cur_visibility;
 	fw3.release();
@@ -481,7 +505,7 @@ void CalibBall::FindCircle(
 	filename << "output//ref_cut_" << cam_idx << ".jpg";
 	imwrite(filename.str(), image);
 #endif
-	cout << ">> " << cam_idx << " FindCircle() done!!" << endl;
+	std::cout << ">> " << cam_idx << " FindCircle() done!!" << endl;
 }
 
 void CalibBall::FindPoints(
@@ -578,7 +602,7 @@ void CalibBall::FindPoints(
 	filename << "output//tag_mask_" << cam_idx << ".jpg";
 	imwrite(filename.str(), tag_mask);
 #endif
-	cout << ">> " << cam_idx << " FindPoints() done!!" << endl;
+	std::cout << ">> " << cam_idx << " FindPoints() done!!" << endl;
 }
 
 void CalibBall::PointI2W(
@@ -755,7 +779,7 @@ void CalibBall::ProcessForSBA(
 	}
 	int count = 0;
 	double threshold = SHARED_PNT_THRES;
-	cout << "visibility: ";
+	std::cout << "visibility: ";
 	int vis_size = int(visibility.size());
 	vector<Mat> points_normed(pntsW.size());
 	for (int i = 0; i < pntsW.size(); i++)
@@ -799,7 +823,7 @@ void CalibBall::ProcessForSBA(
 			}
 		}
 	}
-	cout << count << "/" << visibility.size() << endl;
+	std::cout << count << "/" << visibility.size() << endl;
 	visibility = visibility_new;
 }
 
@@ -841,7 +865,7 @@ void CalibBall::ProjectToImg(
 		imwrite("output//projection//" + imagelist[i], image);
 #endif
 	}
-	std::cout << ">>" << "mean projection error: " << total_proj_error / proj_npnts << " pixels of " << proj_npnts << " projections" <<  endl;
+	std::cout << ">>" << " mean projection error: " << total_proj_error / proj_npnts << " pixels of " << proj_npnts << " projections" <<  endl;
 	for (int i = 0; i < pntsW.size(); i++)
 	{
 		total_radius_error += norm(pntsW[i]);
@@ -854,4 +878,51 @@ void CalibBall::ScaleToWorld(
 	vector<Mat> &T
 )
 {
+}
+
+FileStorage& operator <<(FileStorage& out, Point3i &data)
+{
+	out << data;
+	return out;
+}
+
+void CalibBall::OutputForViewer(
+	const vector<Point3d> pntsW, 
+	const vector<Mat> R, 
+	const vector<Mat> T
+)
+{
+	FileStorage fw("structure.yml", FileStorage::WRITE);
+	if (!fw.isOpened())
+	{
+		std::cout << ">> cannot open structure.yml!" << endl;
+		exit(-1);
+	}
+	fw << "Camera Count" << _cam_num;
+	int npnt = pntsW.size();
+	fw << "Point Count" << npnt;
+	fw << "Rotations" << R;
+	fw << "Motions" << T;
+	//fw << "Points" << pntsW;
+	fw.release();
+	ofstream fw_("structure.yml", std::ios::app);
+	if (!fw_.is_open())
+	{
+		std::cout << ">> cannot open structure.yml!" << endl;
+	}
+	fw_ << "Points:" << endl;
+	for (int i = 0; i < npnt; i++)
+	{
+		fw_ << "   -[ " << pntsW[i].x << ", " << pntsW[i].y << "," << endl
+			<< "      " << pntsW[i].z << " ]" << endl;
+	}
+	fw_ << "Colors:" << endl;
+	vector<Point3i> color(npnt);
+	for (int i = 0; i < npnt; i++)
+	{
+		color[i] = Point3i(255, 255, 255);
+		fw_ << "   -[ " << color[i].x << ", " << color[i].y << ", " << color[i].z << " ]" << endl;
+	}
+	fw_.close();
+	std::cout << ">> successfully write structure.yml!" << endl;
 }

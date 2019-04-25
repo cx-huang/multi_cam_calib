@@ -38,6 +38,7 @@ private:
 	void ProcessForSBA(vector<vector<Point2f>> pntpairsI, vector<Matx33d> pntpairsW_normed, vector<Point2d> &pntsI, vector<Point3d> pntsW, vector<int> &visibility);
 	void ProjectToImg(vector<string> &imagelist, vector<Mat> cam_matrices, vector<Mat> R, vector<Mat> T, vector<Point3d> pntsW, vector<vector<Point2d>> pntsI, vector<vector<int>> visibility);
 	void ScaleToWorld(vector<Point3d> &pntsW, vector<Mat> &T);
+	void OutputForViewer(const vector<Point3d> pntsW, const vector<Mat> R, const vector<Mat> T);
 };
 
 void DetectCircle(Mat image, Vec3d &circle_, double min_circle_radius, double max_circle_radius);
