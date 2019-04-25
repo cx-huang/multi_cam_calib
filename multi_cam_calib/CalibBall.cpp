@@ -2,19 +2,6 @@
 #include "opencv2/cvsba.h"
 #include "fstream"
 
-#define IS_DEBUG_FINDPOINTS
-#define IS_DEBUG_CALR
-//#define IS_OUTPUT_CIRCLE
-//#define IS_DRAW_POINTS
-#define IS_PROJ
-#define MINR 1000	//in FindCircle(): the minimum radius of the circle in the image
-#define MAXR 2000	//in FindCircle(): the maximum raidus of the circle in the image
-#define CIRCLE_CUT 120	
-#define TAG_THRES 50	//in FindPoints(): for binarization of tag mask
-#define SHARED_PNT_THRES 0.1//in CalR(): for selection of shared points
-#define SBA_ITERATION 1000
-#define SBA_MINERROR 1e-1
-#define SBA_FIXED_INTRINSIC 1
 #define SQUARE(x) ((x) * (x))
 #define MAX(a, b) ((a>b)?(a):(b))
 #define ASSERT(expression)	if(expression)\
@@ -23,9 +10,26 @@
 							}\
 							else\
 							{\
-								std::cout << "[Assertion failed!] file # " << __FILE__ << " #, line # " << __LINE__ << " #" << endl; \
+								std::cout << ">> [Assertion failed!] file # " << __FILE__ << " #, line # " << __LINE__ << " #" << endl; \
 								abort();\
 							}
+
+//#define IS_OUTPUT_CIRCLE
+//#define IS_DRAW_POINTS
+#define IS_PROJ
+#define IS_DEBUG_FINDPOINTS
+#define IS_DEBUG_CALR
+#define IS_SBA_TWICE
+
+#define MINR 1000	//in FindCircle(): the minimum radius of the circle in the image
+#define MAXR 2000	//in FindCircle(): the maximum raidus of the circle in the image
+#define CIRCLE_CUT 120	
+#define TAG_THRES 50	//in FindPoints(): for binarization of tag mask
+#define SHARED_PNT_THRES 0.1//in CalR(): for selection of shared points
+#define SBA_ITERATION 1000
+#define SBA_MINERROR 1e-1
+#define SBA_FIXED_INTRINSIC 1
+#define SBA_TWICE_THRES 2
 
 CalibBall::CalibBall(
 	string config_filename
@@ -132,20 +136,11 @@ void CalibBall::Run(
 
 	//std::cout << ">> projection before SBA:" << endl;
 	//ProjectToImg(cur_imagelist, cam_matrices, R, T, pntsW, pntsI, visibility);
-	cvsba::Sba sba;
-	cvsba::Sba::Params params;
-	params.type = cvsba::Sba::MOTIONSTRUCTURE;
-	params.iterations = SBA_ITERATION;
-	params.minError = SBA_MINERROR;
-	params.fixedIntrinsics = SBA_FIXED_INTRINSIC;
-	params.fixedDistortion = 5;
-	params.verbose = 0;
-	sba.setParams(params);
-	sba.run(pntsW, pntsI, visibility, cam_matrices, R, T, dis_coeffs);
-	std::cout << ">> SBA optimization:" << endl << "initial error: " << sba.getInitialReprjError() << endl << "final error: " << sba.getFinalReprjError() << endl;
+	SBAOptimization(pntsW, pntsI, visibility, cam_matrices, R, T, dis_coeffs);
 	//std::cout << ">> projection after SBA:" << endl;
 	//ProjectToImg(cur_imagelist, cam_matrices, R, T, pntsW, pntsI, visibility);
-	OutputForViewer(pntsW, R, T);
+	//OutputForViewer(pntsW, R, T);
+	OutputCamParam(cam_matrices, R, T, dis_coeffs);
 	clock_t end = clock();
 	std::cout << ">> duration: " << (end - start) / CLOCKS_PER_SEC << "s / " << (end - start) / CLOCKS_PER_SEC / 60 << "min" << endl;
 }
@@ -880,12 +875,6 @@ void CalibBall::ScaleToWorld(
 {
 }
 
-FileStorage& operator <<(FileStorage& out, Point3i &data)
-{
-	out << data;
-	return out;
-}
-
 void CalibBall::OutputForViewer(
 	const vector<Point3d> pntsW, 
 	const vector<Mat> R, 
@@ -925,4 +914,90 @@ void CalibBall::OutputForViewer(
 	}
 	fw_.close();
 	std::cout << ">> successfully write structure.yml!" << endl;
+}
+
+void SBAOptimization(
+	vector<Point3d> &pntsW,
+	vector<vector<Point2d>> &pntsI, 
+	vector<vector<int>> &visibility,
+	vector<Mat> &cam_matrices,
+	vector<Mat> &R, 
+	vector<Mat> &T,
+	vector<Mat> &dis_coeffs
+)
+{
+	cvsba::Sba sba;
+	cvsba::Sba::Params params;
+	params.type = cvsba::Sba::MOTIONSTRUCTURE;
+	params.iterations = SBA_ITERATION;
+	params.minError = SBA_MINERROR;
+	params.fixedIntrinsics = SBA_FIXED_INTRINSIC;
+	params.fixedDistortion = 5;
+	params.verbose = 0;
+	sba.setParams(params);
+	sba.run(pntsW, pntsI, visibility, cam_matrices, R, T, dis_coeffs);
+	std::cout << ">> SBA optimization:" << endl << "initial error: " << sba.getInitialReprjError() << endl;
+#ifdef IS_SBA_TWICE
+	for (int i = 0; i < cam_matrices.size(); i++)
+	{
+		Mat P1 = cam_matrices[i] * R[i];
+		Mat P2 = cam_matrices[i] * T[i];
+		for (int j = 0; j < pntsW.size(); j++)
+		{
+			if (visibility[i][j] == 1)
+			{
+				Mat pnt = P1 * Mat(pntsW[j]) + P2;
+				Point2d center(pnt.at<double>(0, 0) / pnt.at<double>(2, 0), pnt.at<double>(1, 0) / pnt.at<double>(2, 0));
+				if (norm(center - pntsI[i][j]) > SBA_TWICE_THRES)
+				{
+					visibility[i][j] = 0;
+				}
+			}
+		}
+	}
+	sba.run(pntsW, pntsI, visibility, cam_matrices, R, T, dis_coeffs);
+#endif
+	std::cout << "final error: " << sba.getFinalReprjError() << endl;
+}
+
+void OutputCamParam(
+	vector<Mat> cam_matrices, 
+	vector<Mat> R, 
+	vector<Mat> T, 
+	vector<Mat> dis_coeffs)
+{
+	int cam_num = R.size();
+	vector<Mat> extrinsic(cam_num);
+	for (int i = 0; i < cam_num; i++)
+	{
+		extrinsic[i] = Mat::zeros(3, 4, CV_64FC1);
+		R[i].copyTo(extrinsic[i](Rect(0, 0, 3, 3)));
+		T[i].copyTo(extrinsic[i](Rect(3, 0, 1, 3)));
+		extrinsic[i].at<double>(2, 3) = 1;
+	}
+	vector<Mat> dis_coeffs_4(cam_num);
+	for (int i = 0; i < cam_num; i++)
+	{
+		(dis_coeffs[i](Rect(0, 0, 1, 4))).copyTo(dis_coeffs_4[i]);
+	}
+	FileStorage fw("calib_camera.yml", FileStorage::WRITE);
+	if (!fw.isOpened())
+	{
+		std::cout << ">> cannot open calib_camera.yml!" << endl;
+	}
+	for (int i = 0; i < cam_num; i++)
+	{
+		stringstream ss;
+		ss << "intrinsic-" << i;
+		fw << ss.str() << cam_matrices[i];
+		ss.clear();
+		ss.str("");
+		ss << "extrinsic-" << i;
+		fw << ss.str() << extrinsic[i];
+		ss.clear();
+		ss.str("");
+		ss << "distCoeff-" << i;
+		fw << ss.str() << dis_coeffs_4[i];
+	}
+	fw.release();
 }

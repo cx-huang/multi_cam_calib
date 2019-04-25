@@ -43,3 +43,5 @@ private:
 
 void DetectCircle(Mat image, Vec3d &circle_, double min_circle_radius, double max_circle_radius);
 void TwoPass(const Mat &binary_image, Mat &label_image);
+void SBAOptimization(vector<Point3d> &pntsW, vector<vector<Point2d>> &pntsI, vector<vector<int>> &visibility, vector<Mat> &cam_matrices, vector<Mat> &R, vector<Mat> &T, vector<Mat> &dis_coeffs);
+void OutputCamParam(vector<Mat> cam_matrices, vector<Mat> R, vector<Mat> T, vector<Mat> dis_coeffs);
