@@ -14,16 +14,17 @@
 								abort();\
 							}
 
-//#define IS_OUTPUT_CIRCLE
-//#define IS_DRAW_POINTS
+#define IS_OUTPUT_CIRCLE
+#define IS_DRAW_POINTS
 #define IS_PROJ
-#define IS_DEBUG_FINDPOINTS
-#define IS_DEBUG_CALR
+//#define IS_DEBUG_FINDPOINTS	//skip FindCircle(), FindPoints(), CalT(), PointI2W()
+//#define IS_DEBUG_CALR
 #define IS_SBA_TWICE
 
 #define MINR 1000	//in FindCircle(): the minimum radius of the circle in the image
 #define MAXR 2000	//in FindCircle(): the maximum raidus of the circle in the image
-#define CIRCLE_CUT 120	
+#define CIRCLE_CUT 120
+#define SCALE 2
 #define TAG_THRES 50	//in FindPoints(): for binarization of tag mask
 #define SHARED_PNT_THRES 0.1//in CalR(): for selection of shared points
 #define SBA_ITERATION 1000
@@ -510,19 +511,22 @@ void CalibBall::FindPoints(
 	int cam_idx
 )
 {
+	Mat half_image;
+	resize(image, half_image, Size(), 1.0 / SCALE, 1.0 / SCALE);
+
 	//step1: seperate tags
 	vector<Mat> rgb;
-	split(image, rgb);
+	split(half_image, rgb);
 	Mat tag_mask = rgb[1] - rgb[2];
 	tag_mask = tag_mask > TAG_THRES;
 	tag_mask = 255 - tag_mask;
 
 	//step2: find points on the tags
-	Mat gray_image;
-	cvtColor(image, gray_image, CV_BGR2GRAY);
+	Mat gray_half_image;
+	cvtColor(half_image, gray_half_image, CV_BGR2GRAY);
 	vector<Point2f> pnts;
-	goodFeaturesToTrack(gray_image, pnts, 100, 0.1, 60, tag_mask, 5);	//10s or so
-	clock_t end_2 = clock();
+	goodFeaturesToTrack(gray_half_image, pnts, 100, 0.1, 60, tag_mask, 5);	//10s or so
+	
 	vector<Point2f> tag_pnts;
 	for (int i = 0; i < pnts.size(); i++)
 	{
@@ -534,7 +538,7 @@ void CalibBall::FindPoints(
 	pnts.clear();
 
 	Mat binary_image, label_image;
-	Mat tag_mask_ROI = tag_mask(Rect((int)(circle_[0] - circle_[2]), (int)(circle_[1] - circle_[2]), (int)(2 * circle_[2]), (int)(2 * circle_[2])));
+	Mat tag_mask_ROI = tag_mask(Rect((int)((circle_[0] - circle_[2]) / SCALE), (int)((circle_[1] - circle_[2]) / SCALE), (int)(2 * circle_[2] / SCALE), (int)(2 * circle_[2] / SCALE)));
 	Mat mask(tag_mask_ROI.size(), CV_8UC1, Scalar(1));
 	mask.copyTo(binary_image, tag_mask_ROI);
 	TwoPass(binary_image, label_image);	//1min or so
@@ -544,7 +548,7 @@ void CalibBall::FindPoints(
 	int tag_idx = 0;
 	for (int i = 0; i < tag_pnts.size(); i++)
 	{
-		int region_idx = label_image.at<int>(tag_pnts[i].y - (circle_[1] - circle_[2]), tag_pnts[i].x - (circle_[0] - circle_[2]));
+		int region_idx = label_image.at<int>(tag_pnts[i].y - (circle_[1] - circle_[2]) / SCALE, tag_pnts[i].x - (circle_[0] - circle_[2]) / SCALE);
 		if (region.count(region_idx) <= 0)
 		{
 			region[region_idx] = tag_idx++;
@@ -558,6 +562,8 @@ void CalibBall::FindPoints(
 		}
 	}
 
+	Mat gray_image;
+	cvtColor(image, gray_image, CV_BGR2GRAY);
 	TermCriteria criteria = TermCriteria(CV_TERMCRIT_EPS + CV_TERMCRIT_ITER, 40, 0.001);
 	float ratio = 0.1f;	//TODO: figure out a proper value
 	for (int i = 0; i < tag.size(); i++)
@@ -568,7 +574,11 @@ void CalibBall::FindPoints(
 		vector<Point2f> pntpair(2);
 		pntpair[0] = tag_pnts[tag[i][0]];
 		pntpair[1] = tag_pnts[tag[i][1]];
-		cornerSubPix(gray_image, pntpair, Size(5, 5), Size(-1, -1), criteria);
+		cornerSubPix(gray_half_image, pntpair, Size(5, 5), Size(-1, -1), criteria);
+
+		pntpair[0] = SCALE * pntpair[0];
+		pntpair[1] = SCALE * pntpair[1];
+		cornerSubPix(gray_half_image, pntpair, Size(5, 5), Size(-1, -1), criteria);
 
 		//step4: differentiate left point with right point
 		Point2f pnt1 = (1 - ratio) * pntpair[0] + ratio * pntpair[1];
