@@ -1,5 +1,212 @@
 #include "CalibBall.h"
 
+/*
+作者：饶咖
+3.0 版本 改进：
+先进行图像处理：锐化（突出边缘）。
+在缩略窗口分成两次点击：减小对拍摄的要求（之前球需在照片中心）。
+*/
+//缩略图的缩放比例,注意：尽可能倒数为有限小数
+#define SCALE 0.1
+//可显示的最大宽度、高度
+#define SCREEN_WIDTH 1400
+#define SCREEN_HIGH 700
+
+#define CIRCLE_CUT 120
+
+//源图像，缩略图，选中的第一个和第二个区域
+Mat src, shrink_src, area, next_area;
+//两个区域的对角点
+Point area_p1, area_p2, next_area_p1, next_area_p2;
+//选中的圆上的点
+Point circle_p;
+//全局变量
+int idx;
+//标志
+bool clicked;//flag：选定圆上第二个点
+int count_click;//flag：缩略窗口点击次数
+//结果
+Point center;
+double radius;
+vector<Vec3d> result;
+//第二个区域窗口 鼠标事件处理函数
+void next_area_mouse(int event, int x, int y, int flags, void *ustc)
+{
+	Point loc;
+	Mat temp;//动态效果
+	Point temp_p;
+	Vec3d temp_result;
+	//鼠标滑动的时候画圆（选定第二个边缘点后不再画）
+	if (event == CV_EVENT_MOUSEMOVE && !clicked)
+	{
+		next_area.copyTo(temp);
+		//得到当前鼠标坐标在源图像上的映射点
+		loc.x = next_area_p2.x + y;
+		loc.y = next_area_p2.y + x;
+		//计算对于源图像的圆心、半径
+		center.x = (circle_p.x + loc.x) / 2;
+		center.y = (circle_p.y + loc.y) / 2;
+		radius = sqrt((circle_p.x - loc.x)*(circle_p.x - loc.x) + (circle_p.y - loc.y)*(circle_p.y - loc.y)) / 2;
+		//计算对于第二个区域画圆的圆心、半径
+		temp_p.x = center.y - next_area_p2.y;
+		temp_p.y = center.x - next_area_p2.x;
+		circle(temp, temp_p, radius, Scalar(0, 0, 255));
+		imshow("next_area", temp);
+	}
+
+	//左键按下
+	if (event == CV_EVENT_LBUTTONDOWN)
+	{
+		destroyWindow("next_area");
+		//将结果保存到数组中
+		temp_result[0] = center.x;
+		temp_result[1] = center.y;
+		temp_result[2] = radius;
+		result.push_back(temp_result);
+		//画圆并输出结果图像
+		clicked = true;
+		circle(src, center, radius, Scalar(0, 0, 255));
+
+		stringstream storagefile;
+		storagefile << "output//points//circle_" << idx << ".jpg";		
+		imwrite(storagefile.str(), src);
+	}
+}
+
+//第一个区域窗口 鼠标事件处理函数
+void area_mouse(int event, int x, int y, int flags, void *ustc)
+{
+	//左键按下
+	if (event == CV_EVENT_LBUTTONDOWN)
+	{
+		destroyWindow("area");
+		//计算得到选中的第一个圆上的点在源图的坐标
+		circle_p.x = y + area_p1.x;
+		circle_p.y = x + area_p1.y;
+
+		//截取源图像上的第二个区域
+		next_area = src(Rect(next_area_p1, next_area_p2));
+		transpose(next_area, next_area);//旋转90°以适应电脑屏幕的显示（转置）
+		imshow("next_area", next_area);
+
+		//注册中心对称区域窗口鼠标事件回调函数
+		setMouseCallback("next_area", next_area_mouse);
+	}
+}
+
+//缩略图窗口 鼠标事件处理函数
+void shrink_mouse(int event, int x, int y, int flags, void *ustc)
+{
+	Mat temp;
+	//鼠标滑动的时候画最大可显示区域
+	if (event == CV_EVENT_MOUSEMOVE)
+	{
+		//选择第一个区域
+		if (count_click == 0)
+		{
+			shrink_src.copyTo(temp);
+			area_p1.x = x;
+			area_p1.y = y;
+			area_p2.x = x + cvRound(SCREEN_HIGH * SCALE);
+			area_p2.y = y + cvRound(SCREEN_WIDTH * SCALE);
+			rectangle(temp, area_p1, area_p2, Scalar(255, 0, 0));
+			imshow("shrink_src", temp);
+		}
+		//选择第二个区域
+		else if (count_click == 1)
+		{
+			shrink_src.copyTo(temp);
+			//先画已经选定的区域
+			rectangle(temp, area_p1, area_p2, Scalar(255, 0, 0));
+			//画滑动区域
+			next_area_p1.x = x + SCREEN_HIGH * SCALE;
+			next_area_p1.y = y + SCREEN_WIDTH * SCALE;
+			next_area_p2.x = x;
+			next_area_p2.y = y;
+			rectangle(temp, next_area_p1, next_area_p2, Scalar(255, 0, 0));
+			imshow("shrink_src", temp);
+		}
+	}
+	//左键按下
+	if (event == CV_EVENT_LBUTTONDOWN)
+	{
+		if (count_click == 0)
+		{
+			++count_click;
+		}
+		else if (count_click == 1)
+		{
+			//尺度换算
+			area_p1.x /= SCALE;
+			area_p1.y /= SCALE;
+			area_p2.x /= SCALE;
+			area_p2.y /= SCALE;
+			next_area_p1.x /= SCALE;
+			next_area_p1.y /= SCALE;
+			next_area_p2.x /= SCALE;
+			next_area_p2.y /= SCALE;
+			//关闭缩略图窗口
+			destroyWindow("shrink_src");
+			//截取源图像对应区域
+			area = src(Rect(area_p1, area_p2));
+			transpose(area, area);//旋转90°以适应电脑屏幕的显示（转置）
+			imshow("area", area);
+			//注册第一个选中区域窗口鼠标事件回调函数
+			setMouseCallback("area", area_mouse);
+		}
+	}
+}
+
+void FindCircleManually(string sample_path, vector<string> imagelist, vector<Vec3d> &circles,  vector<int> cam_list)
+{
+	int num = imagelist.size();
+
+	//用于锐化的拉普拉斯算子
+	Mat kernel(3, 3, CV_32F, Scalar(0));
+	kernel.at<float>(1, 1) = 5.0;
+	kernel.at<float>(0, 1) = -1.0;
+	kernel.at<float>(1, 0) = -1.0;
+	kernel.at<float>(1, 2) = -1.0;
+	kernel.at<float>(2, 1) = -1.0;
+
+	for (idx = 0; idx < num; ++idx)
+	{
+		//读取要找圆的源图片
+		stringstream filename;
+		filename << sample_path << imagelist[cam_list[idx]];
+		src = imread(filename.str());
+		//与拉普拉斯算子进行卷积（锐化）
+		filter2D(src, src, -1, kernel);//进行多次锐化可增强效果
+		//缩略图
+		shrink_src;
+		resize(src, shrink_src, Size(src.cols*SCALE, src.rows*SCALE), 0, 0);
+		//画九宫格
+		line(shrink_src, Point(cvRound(shrink_src.cols / 3), 0), Point(cvRound(shrink_src.cols / 3), shrink_src.rows), Scalar(255, 255, 255));//竖1
+		line(shrink_src, Point(cvRound((shrink_src.cols * 2) / 3), 0), Point(cvRound((shrink_src.cols * 2) / 3), shrink_src.rows), Scalar(255, 255, 255));//竖2
+		line(shrink_src, Point(0, cvRound(shrink_src.rows / 3)), Point(shrink_src.cols, cvRound(shrink_src.rows / 3)), Scalar(255, 255, 255));//横1
+		line(shrink_src, Point(0, cvRound((shrink_src.rows * 2) / 3)), Point(shrink_src.cols, cvRound((shrink_src.rows * 2) / 3)), Scalar(255, 255, 255));//横
+		imshow("shrink_src", shrink_src);
+		//注册缩略图窗口鼠标事件回调函数
+		setMouseCallback("shrink_src", shrink_mouse);
+		//标志初始化
+		clicked = false;
+		count_click = 0;
+		waitKey(0);
+	}
+	circles = result;
+	waitKey(0);
+}
+
+void ExtractCircle(Mat &image, Vec3d circle_)
+{
+	Point2i bestCircleCenter(cvRound(circle_[0]), cvRound(circle_[1]));
+	Mat mask(image.size(), CV_8UC1, Scalar(0));
+	circle(mask, bestCircleCenter, cvRound(circle_[2]) - CIRCLE_CUT, Scalar(255), CV_FILLED);
+	Mat dst;
+	image.copyTo(dst, mask);
+	image = dst;
+}
+
 void getCircle(Point2d& p1, Point2d& p2, Point2d& p3, Point2d& center, double& radius)
 {
 	double x1 = p1.x;

@@ -1,6 +1,7 @@
 #include "CalibBall.h"
 #include "opencv2/cvsba.h"
-#include "fstream"
+#include <fstream>	//for file stream in OutputForViewer()
+#include <direct.h>	//for _mkdir() in CalibBall()
 
 #define SQUARE(x) ((x) * (x))
 #define MAX(a, b) ((a>b)?(a):(b))
@@ -14,23 +15,25 @@
 								abort();\
 							}
 
-#define IS_OUTPUT_CIRCLE
-#define IS_DRAW_POINTS
-#define IS_PROJ
-//#define IS_DEBUG_FINDPOINTS	//skip FindCircle(), FindPoints(), CalT(), PointI2W()
-//#define IS_DEBUG_CALR
-#define IS_SBA_TWICE
+#define IS_OUTPUT_CIRCLE	//if defined, the images produced by FindCircle() is stored into output//points//...
+#define IS_DRAW_POINTS	//if defined, the images produced by FindPoints() is stored into output//points//...
+#define IS_PROJ	//if defined, the images produced by ProjectToImg() is stored into output//projection//...
+//#define IS_DEBUG_FINDPOINTS	//if defined, debug1.yml is read to skip FindCircle(), FindPoints(), CalT(), PointI2W()
+//#define IS_DEBUG_CALR	//if defined, debug2.yml is read to skip CalR() and so on
+#define IS_SBA_TWICE	//if defined, a second time sba.run() is automatically executed according to SBA_TWICE_THRES
 
 #define MINR 1000	//in FindCircle(): the minimum radius of the circle in the image
 #define MAXR 2000	//in FindCircle(): the maximum raidus of the circle in the image
-#define CIRCLE_CUT 120
-#define SCALE 2
+#define CIRCLE_CUT 120	//in FindCircle(): when circle is found, it's cut off CIRCLE_CUT pixels alongside the radius for following processing. Attention! it is used in ExtractCircle() in FindCircle.cpp!
+#define SCALE 2	//in FindPoints(): resize the original image by 1/SCALE for faster performance
 #define TAG_THRES 50	//in FindPoints(): for binarization of tag mask
-#define SHARED_PNT_THRES 0.1//in CalR(): for selection of shared points
-#define SBA_ITERATION 1000
+#define SHARED_PNT_THRES 0.1 //in CalR(): for selection of shared points
+#define SBA_ITERATION 1000	//in SBAOptimization(): SBA parameters
 #define SBA_MINERROR 1e-1
-#define SBA_FIXED_INTRINSIC 1
-#define SBA_TWICE_THRES 2
+#define SBA_FIXED_INTRINSIC 1	//ranges from 1~5, 0 or 1 is commonly used
+#define SBA_TWICE_THRES 2	//in SBAOptimization(): if mean reprojection error falls below 2 pixels, a second time sba.run() is executed to meet precision
+
+int tag_thres;
 
 CalibBall::CalibBall(
 	string config_filename
@@ -39,7 +42,7 @@ CalibBall::CalibBall(
 	FileStorage fp(config_filename, FileStorage::READ);
 	if (fp.isOpened() == false)
 	{
-		std::cout << "cannot open file # " << config_filename << " #" << endl;
+		std::cout << ">> cannot open " << config_filename << "!" << endl;
 		exit(-1);
 	}
 
@@ -48,15 +51,23 @@ CalibBall::CalibBall(
 	fp["sample_filepath"] >> _sample_filepath;
 	fp["imagelist_vector"] >> _imagelist_vector;
 	fp["backgroundlist_vector"] >> _backgroundlist_vector;
+	fp["is_auto"] >> _is_auto;
 	fp["ball_radii"] >> _ball_radii;
 	fp["tag_pnt_dist"] >> _tag_pnt_dist;
 	fp["principal_pnt_x"] >> _principal_pnt_x;
 	fp["principal_pnt_y"] >> _principal_pnt_y;
 	fp["focal_len"] >> _focal_len;
 	
+	//parameter check
 	ASSERT(_cam_num > 0 && _cam_num == _cam_list.size());
 	ASSERT(!_imagelist_vector.empty() && _imagelist_vector.size() == _backgroundlist_vector.size());
 	ASSERT(_cam_num == _principal_pnt_x.size() && _cam_num == _principal_pnt_y.size() && _cam_num == _focal_len.size());
+
+	//create directory, if directory exists, nothing occurs
+	_mkdir("output");
+	_mkdir("output//projection");
+	_mkdir("output//points");
+	_mkdir("output//yml");
 }
 
 CalibBall::~CalibBall()
@@ -76,7 +87,7 @@ void CalibBall::Run(
 		exit(-1);
 	}
 
-	vector<Mat> cam_matrices(_cam_num), R(_cam_num), T(_cam_num), dis_coeffs(_cam_num);
+	vector<Mat> cam_matrices(_cam_num), R(_cam_num), T(_cam_num), dist_coeffs(_cam_num);
 	for (int i = 0; i < _cam_num; ++i)
 	{
 		cam_matrices[i] = Mat::zeros(3, 3, CV_64FC1);
@@ -85,7 +96,7 @@ void CalibBall::Run(
 		cam_matrices[i].at<double>(0, 2) = _principal_pnt_x[_cam_list[i]];
 		cam_matrices[i].at<double>(1, 2) = _principal_pnt_y[_cam_list[i]];
 		cam_matrices[i].at<double>(2, 2) = 1;
-		dis_coeffs[i] = Mat::zeros(5, 1, CV_64FC1);
+		dist_coeffs[i] = Mat::zeros(5, 1, CV_64FC1);
 	}
 
 	vector<Point3d> pntsW;
@@ -135,13 +146,13 @@ void CalibBall::Run(
 			pntsW.push_back(cur_pntsW[i] + T_temp);
 	}
 
-	//std::cout << ">> projection before SBA:" << endl;
-	//ProjectToImg(cur_imagelist, cam_matrices, R, T, pntsW, pntsI, visibility);
-	SBAOptimization(pntsW, pntsI, visibility, cam_matrices, R, T, dis_coeffs);
-	//std::cout << ">> projection after SBA:" << endl;
-	//ProjectToImg(cur_imagelist, cam_matrices, R, T, pntsW, pntsI, visibility);
+	std::cout << ">> projection before SBA:" << endl;
+	ProjectToImg(cur_imagelist, cam_matrices, R, T, pntsW, pntsI, visibility);
+	SBAOptimization(pntsW, pntsI, visibility, cam_matrices, R, T, dist_coeffs);
+	std::cout << ">> projection after SBA:" << endl;
+	ProjectToImg(cur_imagelist, cam_matrices, R, T, pntsW, pntsI, visibility);
 	//OutputForViewer(pntsW, R, T);
-	OutputCamParam(cam_matrices, R, T, dis_coeffs);
+	OutputCamParam(cam_matrices, R, T, dist_coeffs);
 	clock_t end = clock();
 	std::cout << ">> duration: " << (end - start) / CLOCKS_PER_SEC << "s / " << (end - start) / CLOCKS_PER_SEC / 60 << "min" << endl;
 }
@@ -159,6 +170,13 @@ void CalibBall::RunOnce(
 	vector<vector<vector<Point3d>>> pntpairsW(_cam_num);
 	vector<vector<vector<Point2f>>> pntpairsI(_cam_num);
 	vector<Vec3d> circles(_cam_num);
+	
+	DetermineTagThres(_sample_filepath + imagelist[0]);
+
+	if (!_is_auto)
+	{
+		FindCircleManually(_sample_filepath, imagelist, circles, _cam_list);
+	}
 #ifndef IS_DEBUG_FINDPOINTS
 	//step1: find points on the ball and calculate T
 #pragma omp parallel for
@@ -170,13 +188,16 @@ void CalibBall::RunOnce(
 		Mat background = imread(_sample_filepath + backgroundlist[i]);
 		ASSERT(background.rows != 0 && background.cols != 0);
 
-		FindCircle(image, background, circles[i], i);	//2min or so
+		if (_is_auto)
+		{
+			FindCircle(image, background, circles[i], i);	//2min or so
+		}
 		FindPoints(image, pntpairsI[i], circles[i], i);	//12min or so
 		CalT(T[i], circles[i], i);
 		PointI2W(pntpairsI[i], pntpairsW[i], circles[i], T[i], i);
 	}
 
-	FileStorage fw1("debug1.yml", FileStorage::WRITE);
+	FileStorage fw1("output//yml//debug1.yml", FileStorage::WRITE);
 	if (!fw1.isOpened())
 	{
 		std::cout << ">> cannot open debug1.yml!" << endl;
@@ -203,7 +224,7 @@ void CalibBall::RunOnce(
 	fw1.release();
 	std::cout << ">> successfully write debug1.yml!" << endl;
 #else	//read data from file
-	FileStorage fr1("debug1.yml", FileStorage::READ);
+	FileStorage fr1("output//yml//debug1.yml", FileStorage::READ);
 	if (!fr1.isOpened())
 	{
 		std::cout << ">> cannot open debug1.yml!" << endl;
@@ -248,7 +269,7 @@ void CalibBall::RunOnce(
 		CalR(pntpairsW_normed[i - 1], pntpairsW_normed[i], cur_visibility[i - 1], cur_visibility[i], cur_pntsW, R[i]);
 	}
 
-	FileStorage fw2("debug2.yml", FileStorage::WRITE);
+	FileStorage fw2("output//yml//debug2.yml", FileStorage::WRITE);
 	if (!fw2.isOpened())
 	{
 		std::cout << ">> cannot open debug2.yml!" << endl;
@@ -261,7 +282,7 @@ void CalibBall::RunOnce(
 	fw2.release();
 	std::cout << ">> successfully write debug2.yml!" << endl;
 #else
-	FileStorage fr2("debug2.yml", FileStorage::READ);
+	FileStorage fr2("output//yml//debug2.yml", FileStorage::READ);
 	if (!fr2.isOpened())
 	{
 		std::cout << ">> cannot open debug2.yml!" << endl;
@@ -278,7 +299,7 @@ void CalibBall::RunOnce(
 	for (int i = 0; i < _cam_num; ++i)
 		ProcessForSBA(pntpairsI[i], pntpairsW_normed[i], cur_pntsI[i], cur_pntsW, cur_visibility[i]);
 
-	FileStorage fw3("debug3.yml", FileStorage::WRITE);
+	FileStorage fw3("output//yml//debug3.yml", FileStorage::WRITE);
 	if (!fw3.isOpened())
 	{
 		std::cout << ">> cannot open debug3.yml!" << endl;
@@ -484,21 +505,21 @@ void CalibBall::FindCircle(
 
 #ifdef IS_OUTPUT_CIRCLE
 	stringstream filename;
-	filename << "output//contour_" << cam_idx << ".jpg";
+	filename << "output//points//contour_" << cam_idx << ".jpg";
 	imwrite(filename.str(), gray);
 	filename.clear();
 	filename.str("");
 
 	Mat ref1 = image.clone();
 	circle(ref1, bestCircleCenter, cvRound(circle_[2]), Scalar(255, 255, 255), 5);
-	filename << "output//circle_" << cam_idx << ".jpg";
+	filename << "output//points//circle_" << cam_idx << ".jpg";
 	imwrite(filename.str(), ref1);
 	filename.clear();
 	filename.str("");
 #endif
 	image = dst;
 #ifdef IS_OUTPUT_CIRCLE
-	filename << "output//ref_cut_" << cam_idx << ".jpg";
+	filename << "output//points//ref_cut_" << cam_idx << ".jpg";
 	imwrite(filename.str(), image);
 #endif
 	std::cout << ">> " << cam_idx << " FindCircle() done!!" << endl;
@@ -511,6 +532,11 @@ void CalibBall::FindPoints(
 	int cam_idx
 )
 {
+	if (!_is_auto)
+	{
+		ExtractCircle(image, circle_);
+	}
+
 	Mat half_image;
 	resize(image, half_image, Size(), 1.0 / SCALE, 1.0 / SCALE);
 
@@ -518,7 +544,7 @@ void CalibBall::FindPoints(
 	vector<Mat> rgb;
 	split(half_image, rgb);
 	Mat tag_mask = rgb[1] - rgb[2];
-	tag_mask = tag_mask > TAG_THRES;
+	tag_mask = tag_mask > tag_thres;
 	tag_mask = 255 - tag_mask;
 
 	//step2: find points on the tags
@@ -600,11 +626,11 @@ void CalibBall::FindPoints(
 	}
 #ifdef IS_DRAW_POINTS
 	stringstream filename;
-	filename << "output//points_" << cam_idx << ".jpg";
+	filename << "output//points//points_" << cam_idx << ".jpg";
 	imwrite(filename.str(), gray_image);
 	filename.clear();
 	filename.str("");	//these two statement can completely empty stringstream
-	filename << "output//tag_mask_" << cam_idx << ".jpg";
+	filename << "output//points//tag_mask_" << cam_idx << ".jpg";
 	imwrite(filename.str(), tag_mask);
 #endif
 	std::cout << ">> " << cam_idx << " FindPoints() done!!" << endl;
@@ -891,7 +917,7 @@ void CalibBall::OutputForViewer(
 	const vector<Mat> T
 )
 {
-	FileStorage fw("structure.yml", FileStorage::WRITE);
+	FileStorage fw("output//yml//structure.yml", FileStorage::WRITE);
 	if (!fw.isOpened())
 	{
 		std::cout << ">> cannot open structure.yml!" << endl;
@@ -933,7 +959,7 @@ void SBAOptimization(
 	vector<Mat> &cam_matrices,
 	vector<Mat> &R, 
 	vector<Mat> &T,
-	vector<Mat> &dis_coeffs
+	vector<Mat> &dist_coeffs
 )
 {
 	cvsba::Sba sba;
@@ -945,7 +971,7 @@ void SBAOptimization(
 	params.fixedDistortion = 5;
 	params.verbose = 0;
 	sba.setParams(params);
-	sba.run(pntsW, pntsI, visibility, cam_matrices, R, T, dis_coeffs);
+	sba.run(pntsW, pntsI, visibility, cam_matrices, R, T, dist_coeffs);
 	std::cout << ">> SBA optimization:" << endl << "initial error: " << sba.getInitialReprjError() << endl;
 #ifdef IS_SBA_TWICE
 	for (int i = 0; i < cam_matrices.size(); i++)
@@ -965,7 +991,7 @@ void SBAOptimization(
 			}
 		}
 	}
-	sba.run(pntsW, pntsI, visibility, cam_matrices, R, T, dis_coeffs);
+	sba.run(pntsW, pntsI, visibility, cam_matrices, R, T, dist_coeffs);
 #endif
 	std::cout << "final error: " << sba.getFinalReprjError() << endl;
 }
@@ -974,7 +1000,7 @@ void OutputCamParam(
 	vector<Mat> cam_matrices, 
 	vector<Mat> R, 
 	vector<Mat> T, 
-	vector<Mat> dis_coeffs)
+	vector<Mat> dist_coeffs)
 {
 	int cam_num = R.size();
 	vector<Mat> extrinsic(cam_num);
@@ -988,9 +1014,9 @@ void OutputCamParam(
 	vector<Mat> dis_coeffs_4(cam_num);
 	for (int i = 0; i < cam_num; i++)
 	{
-		(dis_coeffs[i](Rect(0, 0, 1, 4))).copyTo(dis_coeffs_4[i]);
+		(dist_coeffs[i](Rect(0, 0, 1, 4))).copyTo(dis_coeffs_4[i]);
 	}
-	FileStorage fw("calib_camera.yml", FileStorage::WRITE);
+	FileStorage fw("output//yml//calib_camera.yml", FileStorage::WRITE);
 	if (!fw.isOpened())
 	{
 		std::cout << ">> cannot open calib_camera.yml!" << endl;

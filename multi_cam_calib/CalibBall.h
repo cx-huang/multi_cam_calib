@@ -19,6 +19,7 @@ public:
 	string _sample_filepath;
 	vector<string> _imagelist_vector;
 	vector<string> _backgroundlist_vector;
+	int _is_auto;
 	float _ball_radii;
 	float _tag_pnt_dist;
 	vector<int> _principal_pnt_x;
@@ -45,3 +46,6 @@ void DetectCircle(Mat image, Vec3d &circle_, double min_circle_radius, double ma
 void TwoPass(const Mat &binary_image, Mat &label_image);
 void SBAOptimization(vector<Point3d> &pntsW, vector<vector<Point2d>> &pntsI, vector<vector<int>> &visibility, vector<Mat> &cam_matrices, vector<Mat> &R, vector<Mat> &T, vector<Mat> &dis_coeffs);
 void OutputCamParam(vector<Mat> cam_matrices, vector<Mat> R, vector<Mat> T, vector<Mat> dis_coeffs);
+void DetermineTagThres(string image_path);
+void FindCircleManually(string sample_path, vector<string> imagelist, vector<Vec3d> &circles, vector<int> cam_list);
+void ExtractCircle(Mat &image, Vec3d circle_);
